@@ -10,6 +10,7 @@ import { getValorennummer } from "../../../../lib/valorennummern";
 import { buildCode128CContent } from "../../../../lib/barcode-utils";
 import { generateAllBarcodes } from "../../../../lib/barcode";
 
+export const runtime     = "nodejs";       // bwip-js benötigt Node.js – kein Edge Runtime
 export const maxDuration = 60;
 export const dynamic     = "force-dynamic";
 

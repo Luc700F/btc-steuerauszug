@@ -4,6 +4,7 @@ import { formatCHF, formatDatum, formatKrypto, kuerzeText } from "../../../../li
 import { getHistoricalPriceChf } from "../../../../lib/price-service";
 import { getJahresStatus } from "../../../../lib/jahres-utils";
 
+export const runtime     = "nodejs";       // pdf-lib benötigt Node.js – kein Edge Runtime
 export const maxDuration = 60;
 export const dynamic     = "force-dynamic";
 
