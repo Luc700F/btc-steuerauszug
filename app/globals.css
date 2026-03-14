@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* Design-System: Weiss + Krypto-Farben */
+@theme {
+  --color-btc: #F7931A;
+  --color-eth: #627EEA;
+  --color-sol: #9945FF;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #ffffff;
+  color: #111827;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar – dezent */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f9fafb; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* Link-Reset */
+a { color: inherit; text-decoration: none; }
+
+/* Kein horizontales Scrollen */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Mobile-Fixes */
+@media (max-width: 768px) {
+  /* Tabellen horizontal scrollbar */
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* Input-Felder volle Breite */
+  input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}

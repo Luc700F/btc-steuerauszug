@@ -1,0 +1,10 @@
+{
+  "framework": "nextjs",
+  "functions": {
+    "app/api/analyze/route.js":               { "maxDuration": 60 },
+    "app/api/wallet/bitcoin/route.js":        { "maxDuration": 60 },
+    "app/api/wallet/ethereum/route.js":       { "maxDuration": 60 },
+    "app/api/wallet/solana/route.js":         { "maxDuration": 60 },
+    "app/api/export/steuerauszug/route.js":   { "maxDuration": 60 }
+  }
+}
