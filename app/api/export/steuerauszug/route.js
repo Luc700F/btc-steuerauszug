@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import bwipjs from "bwip-js";
+import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
 import { randomUUID } from "crypto";
 import { getHistoricalPriceChf } from "../../../../lib/price-service";
 import { formatCHF, formatDatum, formatKrypto, kuerzeText } from "../../../../lib/formatters";
 import { getJahresStatus } from "../../../../lib/jahres-utils";
 import { generateESteuerauszugXML } from "../../../../lib/esteuerauszug";
 import { getValorennummer } from "../../../../lib/valorennummern";
-import { buildCode128CContent } from "../../../../lib/barcode-utils";
 import { generateAllBarcodes } from "../../../../lib/barcode";
+import {
+  BC_ON_PAGE_W_PT,
+  BC_ON_PAGE_H_PT,
+} from "../../../../lib/barcode-layout";
+import { drawSeitenbarcode } from "../../../../lib/pdf-seitenbarcode";
+import { CONTENT_LEFT } from "../../../../lib/pdf-layout";
 
 export const runtime     = "nodejs";       // bwip-js benötigt Node.js – kein Edge Runtime
 export const maxDuration = 60;
@@ -17,11 +21,11 @@ export const dynamic     = "force-dynamic";
 // ─── Dimensionen A4 Querformat ────────────────────────────────────────────────
 const W = 841.89;
 const H = 595.28;
-const BARCODE_X = 5;   // vertikaler Seitenbarcode: x-Position
-const BARCODE_W = 24;  // vertikaler Seitenbarcode: Breite
-const L = 34;          // linker Inhaltsrand (nach Barcode-Bereich)
-const R = 36;          // rechter Rand
-const IW = W - L - R;  // Inhaltsbreite ≈ 772pt
+// L = CONTENT_LEFT (73pt): Content beginnt NACH dem CODE128C Seitenbarcode (8 + 57 + 8 = 73pt)
+// Lösung A: Content-Startposition nach rechts verschoben, damit Barcode nicht überlagert wird
+const L = CONTENT_LEFT;  // 73pt ≈ 26mm
+const R = 36;             // rechter Rand
+const IW = W - L - R;    // Inhaltsbreite ≈ 733pt
 
 // ─── Valorennummern (ESTV Kursliste) ─────────────────────────────────────────
 const VALOREN = {
@@ -30,20 +34,20 @@ const VALOREN = {
   solana:   { nummer: "81720700", name: "Solana",   symbol: "SOL" },
 };
 
-// ─── Spaltenbreiten Transaktions-Tabelle (Summe = IW = 772) ──────────────────
+// ─── Spaltenbreiten Transaktions-Tabelle (Summe = 732 ≈ IW mit L=73) ────────
 const TX_SPALTEN = [
   { lbl: "Valoren-Nr.",  bw: 54,  rechts: false },
   { lbl: "Datum",        bw: 66,  rechts: false },
-  { lbl: "Bezeichnung",  bw: 116, rechts: false },
+  { lbl: "Bezeichnung",  bw: 100, rechts: false },
   { lbl: "Anzahl",       bw: 74,  rechts: true  },
   { lbl: "Whr.",         bw: 36,  rechts: false },
-  { lbl: "Stückpreis",   bw: 80,  rechts: true  },
+  { lbl: "Stückpreis",   bw: 74,  rechts: true  },
   { lbl: "Ex-Datum",     bw: 54,  rechts: false },
-  { lbl: "Kurs",         bw: 72,  rechts: true  },
-  { lbl: "Steuerwert",   bw: 84,  rechts: true  },
-  { lbl: "Brutt. A",     bw: 64,  rechts: true  },
-  { lbl: "Brutt. B",     bw: 72,  rechts: true  },
-];
+  { lbl: "Kurs",         bw: 68,  rechts: true  },
+  { lbl: "Steuerwert",   bw: 80,  rechts: true  },
+  { lbl: "Brutt. A",     bw: 60,  rechts: true  },
+  { lbl: "Brutt. B",     bw: 66,  rechts: true  },
+]; // 54+66+100+74+36+74+54+68+80+60+66 = 732
 // x-Positionen berechnen
 let _x = L;
 for (const sp of TX_SPALTEN) {
@@ -240,60 +244,32 @@ ${stockZeilen.join("\n")}
 }
 
 // komprimiereUndChunkXml: entfernt – ersetzt durch lib/barcode.js generateAllBarcodes
-// (scale=4, eclevel=2, rohe UTF-8-Chunks à 1800 Bytes, kein deflate/base64)
+// (scale=4, eclevel=2, rohe UTF-8-Chunks à 800 Bytes, kein deflate/base64)
 
-// ─── Barcode PNG generieren (Callback-API bwip-js v4) ────────────────────────
-function barcodePng(optionen) {
-  return new Promise((resolve, reject) => {
-    bwipjs.toBuffer(optionen, (err, png) => {
-      if (err) reject(err);
-      else resolve(png);
-    });
-  });
-}
-
-// ─── Vertikalen CODE128 Barcode vor-generieren + einbetten ───────────────────
-async function vorbereitenBarcode(pdf, text) {
-  try {
-    const png = await barcodePng({
-      bcid:         "code128",
-      text,
-      scale:        1,
-      height:       200,
-      includetext:  true,
-      textsize:     5,
-      rotate:       "L",      // 90° links = vertikal, Text liest von unten nach oben
-      paddingwidth:  2,
-      paddingheight: 2,
-    });
-    return await pdf.embedPng(png);
-  } catch (e) {
-    console.warn("[Barcode] Vorgenierung fehlgeschlagen:", e.message);
-    return null;
-  }
-}
-
-// ─── Seiten-Header zeichnen (synchron, Barcode bereits eingebettet) ──────────
-function zeichneSeiteHeader(seite, schriften, seitenNr, gesamtSeiten, jahr, barcodeImg, kundenInfo) {
+// ─── Seiten-Header zeichnen ──────────────────────────────────────────────────
+function zeichneSeiteHeader(seite, schriften, seitenNr, gesamtSeiten, jahr, barcodeValorNr, kundenInfo) {
   const { bold, normal } = schriften;
+  const { width: pageW, height: pageH } = seite.getSize();
+  const contentL = L;  // = CONTENT_LEFT = 73pt (nach Barcode-Bereich)
+
   const DUNKEL   = rgb(0.067, 0.094, 0.153);
   const HELLGRAU = rgb(0.95, 0.95, 0.95);
   const GRAU     = rgb(0.4, 0.4, 0.4);
 
-  // Vertikaler CODE128 Barcode links am Rand
-  if (barcodeImg) {
-    seite.drawImage(barcodeImg, {
-      x: BARCODE_X, y: 10,
-      width: BARCODE_W, height: H - 20,
-    });
-  }
+  // CODE128C Seitenbarcode oben links (pure pdf-lib Rechtecke, kein bwip-js)
+  drawSeitenbarcode(seite, normal, {
+    valorennummer: barcodeValorNr,
+    jahr:          parseInt(jahr),
+    seite:         seitenNr,
+    gesamtseiten:  gesamtSeiten,
+  });
 
   // Logo oben links
   seite.drawText("btcSteuerauszug.ch", {
-    x: L, y: H - 24, size: 13, font: bold, color: DUNKEL,
+    x: contentL, y: pageH - 24, size: 13, font: bold, color: DUNKEL,
   });
   seite.drawText(`Steuerauszug in CHF 31.12.${jahr}`, {
-    x: L, y: H - 40, size: 9, font: normal, color: GRAU,
+    x: contentL, y: pageH - 40, size: 9, font: normal, color: GRAU,
   });
 
   // Kunden-Info-Box oben rechts (dynamische Höhe je nach Adresse)
@@ -319,9 +295,9 @@ function zeichneSeiteHeader(seite, schriften, seitenNr, gesamtSeiten, jahr, barc
   ];
 
   const BOX_W = 235;
-  const BOX_X = W - R - BOX_W;
+  const BOX_X = pageW - R - BOX_W;
   const BOX_H = 6 + infoZeilen.length * 12;
-  const BOX_Y = H - 12 - BOX_H;
+  const BOX_Y = pageH - 12 - BOX_H;
 
   seite.drawRectangle({
     x: BOX_X, y: BOX_Y, width: BOX_W, height: BOX_H,
@@ -343,22 +319,22 @@ function zeichneSeiteHeader(seite, schriften, seitenNr, gesamtSeiten, jahr, barc
 
   // Trennlinie unter Header (dynamisch, 5pt unter Box-Unterkante)
   seite.drawLine({
-    start: { x: L, y: BOX_Y - 5 }, end: { x: W - R, y: BOX_Y - 5 },
+    start: { x: contentL, y: BOX_Y - 5 }, end: { x: pageW - R, y: BOX_Y - 5 },
     thickness: 0.75, color: rgb(0.8, 0.8, 0.8),
   });
 
   // Footer
   seite.drawLine({
-    start: { x: L, y: 25 }, end: { x: W - R, y: 25 },
+    start: { x: contentL, y: 25 }, end: { x: pageW - R, y: 25 },
     thickness: 0.4, color: rgb(0.88, 0.88, 0.88),
   });
   seite.drawText("btcSteuerauszug.ch", {
-    x: L, y: 13, size: 7.5, font: normal, color: rgb(0.6, 0.6, 0.6),
+    x: contentL, y: 13, size: 7.5, font: normal, color: rgb(0.6, 0.6, 0.6),
   });
   const seitenText = `Seite ${seitenNr} von ${gesamtSeiten}`;
   const sW = normal.widthOfTextAtSize(seitenText, 7.5);
   seite.drawText(seitenText, {
-    x: W - R - sW, y: 13, size: 7.5, font: normal, color: rgb(0.6, 0.6, 0.6),
+    x: pageW - R - sW, y: 13, size: 7.5, font: normal, color: rgb(0.6, 0.6, 0.6),
   });
 }
 
@@ -519,6 +495,16 @@ export async function POST(request) {
     };
     const xmlDaten = generateESteuerauszugXML(xmlSteuerDaten, kundeXmlDaten);
 
+    // PDF417-Barcodes vorab generieren – Anzahl bestimmt Barcode-Seitenzahl (Multi-Wallet Fix)
+    const BC_PER_ROW = 6;
+    let barcodeObjekte = [];
+    try {
+      barcodeObjekte = await generateAllBarcodes(xmlDaten);
+    } catch (e) {
+      console.error("[PDF417] Generierung fehlgeschlagen:", e.message, "\n", e.stack);
+    }
+    console.log("[Steuerauszug] Barcodes generiert:", barcodeObjekte.length);
+
     // PDF vorbereiten
     const pdf    = await PDFDocument.create();
     const bold   = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -539,16 +525,11 @@ export async function POST(request) {
     // Coins im Jahr ermitteln (für Seitenzahl-Schätzung)
     const coinsImJahr = [...new Set(txImJahr.map((tx) => tx.waehrung))];
     const extraZeilen = coinsImJahr.length * 3; // Header + Subtotal + Abstand
-    const txSeitenAnz = Math.max(1, Math.ceil((txImJahr.length + extraZeilen) / 26));
-    const gesamtSeiten = 1 + txSeitenAnz + 1;
+    const txSeitenAnz  = Math.max(1, Math.ceil((txImJahr.length + extraZeilen) / 26));
+    const gesamtSeiten = 1 + txSeitenAnz + 1;  // immer 1 Barcode-Seite (2-Zeilen-Grid)
 
-    // Seitenbarcodes vor-generieren (einmal, dann wiederverwendet)
-    // Inhalt: taxYear(4) + kantonNr(2) + valorennummer(7) + seitenNr(2) = 15 Stellen
-    const barcodeSteuerDaten = { taxYear: parseInt(jahr), canton: kt };
-    const [barcodeInhalt, barcodeSeite] = await Promise.all([
-      vorbereitenBarcode(pdf, buildCode128CContent(barcodeSteuerDaten, 1)),
-      vorbereitenBarcode(pdf, buildCode128CContent(barcodeSteuerDaten, gesamtSeiten)),
-    ]);
+    // Barcode-Valorennummer für Seitenbarcode ermitteln
+    const barcodeValorNr = getValorennummer(hauptSymbol) || valoren.nummer || "3841927";
 
     // Steuerwert berechnen – alle Coins summieren (ETH + ERC-20 + SPL)
     // WICHTIG: IMMER jahresendeFilter anwenden (Folgejahr-Käufe NICHT einrechnen!)
@@ -572,7 +553,7 @@ export async function POST(request) {
     // SEITE 1: ZUSAMMENFASSUNG
     // ═══════════════════════════════════════════════════════════════════════
     const s1 = pdf.addPage([W, H]);
-    zeichneSeiteHeader(s1, schriften, 1, gesamtSeiten, jahr, barcodeInhalt, kundenInfo);
+    zeichneSeiteHeader(s1, schriften, 1, gesamtSeiten, jahr, barcodeValorNr, kundenInfo);
     let y = START_Y;
 
     // Titel
@@ -735,7 +716,7 @@ export async function POST(request) {
 
     let aktivSeite = pdf.addPage([W, H]);
     let seitenNr   = 2;
-    zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeInhalt, kundenInfo);
+    zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeValorNr, kundenInfo);
     y = START_Y + 2;
 
     // Seiten-Titel
@@ -779,7 +760,7 @@ export async function POST(request) {
       if (y < 60) {
         seitenNr++;
         aktivSeite = pdf.addPage([W, H]);
-        zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeInhalt, kundenInfo);
+        zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeValorNr, kundenInfo);
         y = START_Y + 2;
         zeichneTabellenkopf(aktivSeite);
       }
@@ -807,7 +788,7 @@ export async function POST(request) {
         if (y < 60) {
           seitenNr++;
           aktivSeite = pdf.addPage([W, H]);
-          zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeInhalt, kundenInfo);
+          zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeValorNr, kundenInfo);
           y = START_Y + 2;
           zeichneTabellenkopf(aktivSeite);
         }
@@ -857,7 +838,7 @@ export async function POST(request) {
       if (y < 60) {
         seitenNr++;
         aktivSeite = pdf.addPage([W, H]);
-        zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeInhalt, kundenInfo);
+        zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeValorNr, kundenInfo);
         y = START_Y + 2;
         zeichneTabellenkopf(aktivSeite);
       }
@@ -893,7 +874,7 @@ export async function POST(request) {
     if (y < 60) {
       seitenNr++;
       aktivSeite = pdf.addPage([W, H]);
-      zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeInhalt, kundenInfo);
+      zeichneSeiteHeader(aktivSeite, schriften, seitenNr, gesamtSeiten, jahr, barcodeValorNr, kundenInfo);
       y = START_Y + 2;
     }
 
@@ -910,93 +891,90 @@ export async function POST(request) {
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // LETZTE SEITE: BARCODE-BLÄTTER
+    // BARCODE-SEITE: eCH-0196 v2.2.0 – 2-Zeilen-Grid, immer eine einzige Seite
+    // ≤6 Barcodes: 1 Zeile, volle Höhe; 7–12 Barcodes: 2 Zeilen, halbe Höhe
     // ═══════════════════════════════════════════════════════════════════════
+    const BC_GAP_H    = 8;   // horizontaler Abstand zwischen Barcodes (pt)
+    const BARCODE_GAP_Y = 24;  // vertikaler Abstand zwischen Zeilen (pt, inkl. Label-Raum)
+    const sbL  = L;
+    const sbIW = IW;
+
     const sB = pdf.addPage([W, H]);
-    zeichneSeiteHeader(sB, schriften, gesamtSeiten, gesamtSeiten, jahr, barcodeSeite, kundenInfo);
+    zeichneSeiteHeader(sB, schriften, gesamtSeiten, gesamtSeiten, jahr, barcodeValorNr, kundenInfo);
     y = START_Y;
 
-    sB.drawText(`Steuerauszug Kryptow\u00e4hrungen ${jahr}`, {
-      x: L, y, size: 14, font: bold, color: DUNKEL,
-    });
-    y -= 17;
     sB.drawText("Barcode-Bl\u00e4tter", {
-      x: L, y, size: 9, font: normal, color: GRAU,
+      x: sbL, y, size: 11, font: bold, color: DUNKEL,
     });
-    y -= 24;
+    y -= 14;
+    sB.drawText("eCH-0196 v2.2.0 \u00b7 taxStatementType", {
+      x: sbL, y, size: 8, font: normal, color: GRAU,
+    });
+    y -= 20;
 
-    // PDF417-Barcodes via lib/barcode.js generieren
-    // Rohes XML in 1800-Byte-UTF-8-Chunks, scale=4 (~300dpi), eclevel=2 (eCH-0270)
-    let barcodeObjekte = [];
-    try {
-      barcodeObjekte = await generateAllBarcodes(xmlDaten);
-    } catch (e) {
-      console.error("[PDF417] Generierung fehlgeschlagen:", e.message, "\n", e.stack);
-    }
-    const anzahlChunks = barcodeObjekte.length;
+    // Dynamische Barcode-Höhe: bei ≤6 volle Höhe, bei 7–12 halbierte Höhe für 2 Zeilen
+    const needsTwoRows = barcodeObjekte.length > BC_PER_ROW;
+    const FOOTER_RESERVE = 35;  // pt – Footer + Puffer
+    const availableH = y - FOOTER_RESERVE;
+    const barcodeH = needsTwoRows
+      ? Math.floor((availableH - BARCODE_GAP_Y) / 2)
+      : Math.min(BC_ON_PAGE_H_PT, availableH);
 
-    console.log("[Steuerauszug] Barcodes generiert:", anzahlChunks);
-
-    // Barcode-Grid zeichnen (max 3 pro Zeile)
+    // Barcode-Grid: BC_PER_ROW Spalten × max. 2 Zeilen, Hochformat via 90°-Rotation
     if (barcodeObjekte.length > 0) {
-      const COLS    = Math.min(3, barcodeObjekte.length);
-      const ROWS    = Math.ceil(barcodeObjekte.length / COLS);
-      const ZELLE_W = IW / COLS;
-      const ZELLE_H = Math.min(140, (y - 90) / ROWS);
-
       for (let b = 0; b < barcodeObjekte.length; b++) {
         const { png, label } = barcodeObjekte[b];
-        const col  = b % COLS;
-        const row  = Math.floor(b / COLS);
-        const zX   = L + col * ZELLE_W;
-        const zY   = y - (row + 1) * ZELLE_H;
+        const col = b % BC_PER_ROW;
+        const row = Math.floor(b / BC_PER_ROW);
+        const bX  = sbL + col * (BC_ON_PAGE_W_PT + BC_GAP_H);
+        const bY  = y - row * (barcodeH + BARCODE_GAP_Y) - barcodeH;  // untere Kante
 
         try {
-          const bImg   = await pdf.embedPng(png);
-          const bScale = Math.min(
-            (ZELLE_W - 20) / bImg.width,
-            (ZELLE_H - 18) / bImg.height
-          );
-          const bW = bImg.width  * bScale;
-          const bH = bImg.height * bScale;
-
+          const bImg = await pdf.embedPng(png);
+          // Querformat-PNG 90° CCW drehen → Hochformat auf Seite
+          // Anker: bX + BC_ON_PAGE_W_PT, sodass linke Kante bei bX landet
           sB.drawImage(bImg, {
-            x:      zX + (ZELLE_W - bW) / 2,
-            y:      zY + (ZELLE_H - bH) / 2 + 8,
-            width:  bW,
-            height: bH,
+            x:      bX + BC_ON_PAGE_W_PT,
+            y:      bY,
+            width:  barcodeH,           // dynamisch statt BC_ON_PAGE_H_PT
+            height: BC_ON_PAGE_W_PT,
+            rotate: degrees(90),
           });
 
-          const nrW = bold.widthOfTextAtSize(label, 7.5);
-          sB.drawText(label, {
-            x:    zX + (ZELLE_W - nrW) / 2,
-            y:    zY + 2,
-            size: 7.5, font: bold, color: DUNKEL,
-          });
+          const nrW    = bold.widthOfTextAtSize(label, 7.5);
+          const labelY = bY - 10;
+          if (labelY > 28) {  // Label nur zeichnen wenn über Footer-Bereich
+            sB.drawText(label, {
+              x:    bX + BC_ON_PAGE_W_PT / 2 - nrW / 2,
+              y:    labelY,
+              size: 7.5, font: bold, color: DUNKEL,
+            });
+          }
         } catch {}
       }
-      y -= ROWS * ZELLE_H + 14;
+      const rowsDrawn = needsTwoRows ? 2 : 1;
+      y -= rowsDrawn * barcodeH + (rowsDrawn - 1) * BARCODE_GAP_Y + 14;
     } else {
       // Fallback: Fehler-Hinweis
       sB.drawRectangle({
-        x: L, y: y - 40, width: IW, height: 40,
+        x: sbL, y: y - 40, width: sbIW, height: 40,
         color: rgb(0.96, 0.94, 0.94),
       });
       sB.drawText("Barcode konnte nicht generiert werden - XML-Vorschau unten", {
-        x: L + 8, y: y - 20, size: 8, font: normal, color: ROT,
+        x: sbL + 8, y: y - 20, size: 8, font: normal, color: ROT,
       });
       y -= 54;
     }
 
-    // XML-Vorschau (erste 25 Zeilen)
+    // XML-Vorschau (erste ~25 Zeilen, auf der Barcode-Seite)
     if (y > 85) {
       sB.drawLine({
-        start: { x: L, y: y - 2 }, end: { x: W - R, y: y - 2 },
+        start: { x: sbL, y: y - 2 }, end: { x: W - R, y: y - 2 },
         thickness: 0.4, color: MITTELGRAU,
       });
       y -= 12;
-      sB.drawText("XML-Vorschau (eCH-0196 v2.2.0 . taxStatementType):", {
-        x: L, y, size: 7.5, font: bold, color: DUNKEL,
+      sB.drawText("XML-Vorschau (eCH-0196 v2.2.0 \u00b7 taxStatementType):", {
+        x: sbL, y, size: 7.5, font: bold, color: DUNKEL,
       });
       y -= 11;
 
@@ -1004,13 +982,13 @@ export async function POST(request) {
       for (const zeile of xmlZeilen.slice(0, 28)) {
         if (y < 35) break;
         sB.drawText(kuerzeText(zeile.replace(/\t/g, "  "), 140), {
-          x: L, y, size: 6, font: mono, color: GRAU,
+          x: sbL, y, size: 6, font: mono, color: GRAU,
         });
         y -= 8;
       }
       if (xmlZeilen.length > 28 && y >= 35) {
         sB.drawText("... (vollst\u00e4ndiges XML im Barcode oben)", {
-          x: L, y, size: 6, font: mono, color: rgb(0.6, 0.5, 0.1),
+          x: sbL, y, size: 6, font: mono, color: rgb(0.6, 0.5, 0.1),
         });
       }
     }

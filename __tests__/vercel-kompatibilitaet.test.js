@@ -105,7 +105,7 @@ describe("Vercel-Kompatibilität – bwip-js", () => {
     expect(elapsed).toBeLessThan(60000); // Vercel Pro maxDuration
     barcodes.forEach((b) => {
       expect(b.png[0]).toBe(0x89); // PNG-Header
-      expect(b.byteSize).toBeLessThanOrEqual(1400); // Effektives Limit mit columns=12, eclevel=2
+      expect(b.byteSize).toBeLessThanOrEqual(800); // eCH-0196 v2.2.0 Limit: columns=13, rows=35, eclevel=4
     });
   }, 65000);
 });
@@ -256,8 +256,8 @@ describe("Vercel-Kompatibilität – XML + Barcode für alle Chains", () => {
       expect(barcodes.length).toBeGreaterThan(0);
       barcodes.forEach((b) => {
         expect(b.png[0]).toBe(0x89); // PNG magic byte → kein Crash
-        expect(b.png.length).toBeGreaterThan(5000); // min. 5 KB bei scale=4
-        expect(b.byteSize).toBeLessThanOrEqual(1800);
+        expect(b.png.length).toBeGreaterThan(500); // PNG Buffer ist valide
+        expect(b.byteSize).toBeLessThanOrEqual(800); // eCH-0196 v2.2.0 Limit: 800 Bytes/Chunk
       });
     },
     30000

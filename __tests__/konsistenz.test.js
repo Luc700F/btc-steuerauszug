@@ -1,5 +1,7 @@
 import { generateESteuerauszugXML } from "../lib/esteuerauszug";
 import { validateSteuerDaten } from "../lib/validate";
+import { buildSeitenbarcodeData, encodeCode128C } from "../lib/code128c";
+import { ESTV_JAHRESKURSE } from "../lib/price-service";
 
 // 0.00355787 × 69990.44 = 249.02 (gerundet auf 2 Stellen)
 const ENDBESTAND = 0.00355787;
@@ -109,6 +111,55 @@ describe("eSteuerauszug XML – Konsistenz", () => {
   });
 });
 
+// ─── Seitenbarcode (CODE128C) ─────────────────────────────────────────────────
+describe("Seitenbarcode – buildSeitenbarcodeData + encodeCode128C", () => {
+  test("buildSeitenbarcodeData gibt korrekten 18-stelligen String zurück", () => {
+    expect(buildSeitenbarcodeData("3841927", 2025, 1, 3)).toBe("038419272025001003");
+    expect(buildSeitenbarcodeData("3841927", 2025, 2, 3)).toBe("038419272025002003");
+    expect(buildSeitenbarcodeData("3841927", 2025, 3, 3)).toBe("038419272025003003");
+  });
+
+  test("buildSeitenbarcodeData gibt immer gerade Zeichenanzahl zurück (CODE128C-Pflicht)", () => {
+    const result = buildSeitenbarcodeData("3841927", 2025, 1, 3);
+    expect(result.length % 2).toBe(0);
+  });
+
+  test("Valorennummer wird auf 8 Stellen aufgefüllt", () => {
+    expect(buildSeitenbarcodeData("3841927", 2025, 1, 3).substring(0, 8)).toBe("03841927");
+  });
+
+  test("Gesamtlänge = 18 Zeichen", () => {
+    expect(buildSeitenbarcodeData("3841927", 2025, 5, 10).length).toBe(18);
+  });
+
+  test("encodeCode128C wirft bei ungerader Ziffernanzahl", () => {
+    expect(() => encodeCode128C("12345")).toThrow();
+  });
+
+  test("encodeCode128C gibt nur 0 und 1 zurück", () => {
+    const bits = encodeCode128C("038419272025001003");
+    expect(bits).toMatch(/^[01]+$/);
+  });
+
+  test("Steuerübersichts-Route ruft drawSeitenbarcode NICHT auf", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/api/export/pdf/route.js", "utf8");
+    expect(src).not.toContain("drawSeitenbarcode");
+    expect(src).not.toContain("seitenbarcode");
+  });
+
+  test("eSteuerauszug-Route ruft drawSeitenbarcode AUF", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/api/export/steuerauszug/route.js", "utf8");
+    expect(src).toContain("drawSeitenbarcode");
+  });
+
+  test("CONTENT_LEFT ist grösser als Barcode-Breite plus Margin", () => {
+    const { BARCODE_W, BARCODE_MARGIN, CONTENT_LEFT } = require("../lib/pdf-layout.js");
+    expect(CONTENT_LEFT).toBeGreaterThan(BARCODE_W + BARCODE_MARGIN);
+  });
+});
+
 // ─── Steuerwert-Konsistenz verschiedene Jahre ─────────────────────────────────
 describe("Steuerwert-Berechnung – verschiedene Jahre", () => {
   test.each([
@@ -121,5 +172,86 @@ describe("Steuerwert-Berechnung – verschiedene Jahre", () => {
   ])("Jahr %i: %f BTC × CHF %f ≈ CHF %f", (year, btc, kurs, erwartet) => {
     const berechnet = Math.round(btc * kurs * 100) / 100;
     expect(berechnet).toBeCloseTo(erwartet, 0);
+  });
+});
+
+// ─── ESTV Jahreskurse ─────────────────────────────────────────────────────────
+describe("ESTV Jahreskurse – verbindliche ESTV-Kursliste per 31.12.", () => {
+  test("ESTV_JAHRESKURSE ist exportiert und enthält bitcoin", () => {
+    expect(typeof ESTV_JAHRESKURSE).toBe("object");
+    expect(ESTV_JAHRESKURSE).toHaveProperty("bitcoin");
+  });
+
+  test("ESTV BTC 2025 = CHF 69'990.44 (Relai-Referenz)", () => {
+    expect(ESTV_JAHRESKURSE.bitcoin[2025]).toBe(69_990.44);
+  });
+
+  test("ESTV BTC 2024 vorhanden (> 0)", () => {
+    expect(ESTV_JAHRESKURSE.bitcoin[2024]).toBeGreaterThan(0);
+  });
+
+  test("Steuerwert 2025 mit ESTV-Kurs korrekt: 0.00355787 BTC × CHF 69'990.44 = CHF 249.02", () => {
+    const endbestand = 0.00355787;
+    const kurs = ESTV_JAHRESKURSE.bitcoin[2025];
+    const steuerwert = Math.round(endbestand * kurs * 100) / 100;
+    expect(steuerwert).toBe(249.02);
+  });
+
+  test("price-service.js deklariert ESTV als Stufe 0 (vor CoinGecko)", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("lib/price-service.js", "utf8");
+    // ESTV-Check muss VOR dem CoinGecko-Block stehen
+    const idxEstv    = src.indexOf("ESTV_JAHRESKURSE");
+    const idxGecko   = src.indexOf("coingecko.com");
+    expect(idxEstv).toBeGreaterThan(-1);
+    expect(idxEstv).toBeLessThan(idxGecko);
+  });
+
+  test("analyze/route.js berechnet Steuerwert EINMAL (kein mehrfaches fifo.endbestand × kurs)", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/api/analyze/route.js", "utf8");
+    expect(src).toContain("Steuerwert EINMAL");
+    // Kein direktes endbestandAmount * kurs außer an der einen definierten Stelle
+    const matches = src.match(/endbestandAmount\s*\*\s*kursStichtag/g) || [];
+    expect(matches.length).toBe(1);
+  });
+});
+
+// ─── Multi-Wallet Bugs (BUG 1 + BUG 2 + BUG 3) ───────────────────────────────
+describe("Multi-Wallet Bugs – Fixes verifizieren", () => {
+  test("BUG 1: steuerauszug/route.js hat immer genau 1 Barcode-Seite (2-Zeilen-Grid)", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/api/export/steuerauszug/route.js", "utf8");
+    // Keine dynamische Barcode-Seitenanzahl mehr – immer 1 Barcode-Seite
+    expect(src).toContain("gesamtSeiten = 1 + txSeitenAnz + 1");
+    expect(src).not.toContain("col === 0 && b > 0");  // kein multi-page loop
+  });
+
+  test("BUG 1: steuerauszug/route.js 2-Zeilen-Grid mit dynamischer Höhe (needsTwoRows)", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/api/export/steuerauszug/route.js", "utf8");
+    expect(src).toContain("needsTwoRows");
+    expect(src).toContain("BARCODE_GAP_Y");
+  });
+
+  test("BUG 2: Dashboard TransaktionsTabelle key enthält Wallet-Adresse (kein tx.hash-Collision)", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/dashboard/page.js", "utf8");
+    expect(src).not.toContain("key={tx.hash || index}");
+    expect(src).toMatch(/key=\{`\$\{tx\.wallet/);
+  });
+
+  test("BUG 3: pdf/route.js portfolioWertGesamt priorisiert kursStichtag für Hauptwährung", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/api/export/pdf/route.js", "utf8");
+    expect(src).toContain("sym === hauptwaehrung ? kursStichtag");
+  });
+
+  test("BUG 3: Dashboard Multi-Wallet analyze verwendet taxYear - 1 (ESTV-Kurs)", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/dashboard/page.js", "utf8");
+    const matches = src.match(/getFullYear\(\)\s*-\s*1/g) || [];
+    // Sowohl single-wallet als auch multi-wallet useEffect nutzen getFullYear() - 1
+    expect(matches.length).toBeGreaterThanOrEqual(2);
   });
 });

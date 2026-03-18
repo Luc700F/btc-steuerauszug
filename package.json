@@ -10,7 +10,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:unit": "jest --testPathPattern='(konsistenz|barcode|historische-preise|multi-wallet|endbestand|jahres-support|pdf-generierung|security|erc20-sol|fifo|csv-parser|steuerwert-31-12|price-service)'",
+    "test:unit": "jest --testPathPattern='(konsistenz|barcode|historische-preise|multi-wallet|endbestand|jahres-support|pdf-generierung|security|erc20-sol|fifo|csv-parser|steuerwert-31-12|price-service|kurs-steuerwert|barcode-ech0270|barcode-layout)'",
     "test:vercel": "jest --testPathPattern='vercel-kompatibilitaet' --testTimeout=120000",
     "test:realwallet": "jest --testPathPattern='real-wallet' --testTimeout=180000",
     "test:all": "jest --runInBand",

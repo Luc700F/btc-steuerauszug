@@ -282,7 +282,7 @@ function TransaktionsTabelle({ transaktionen, kette, farbe }) {
                 : 0;
             return (
               <tr
-                key={tx.hash || index}
+                key={`${tx.wallet || tx.walletAddress || 'w'}-${tx.hash || index}`}
                 style={{
                   borderBottom: "1px solid #f9fafb",
                   transition: "background 0.1s",
@@ -1322,7 +1322,7 @@ export default function Dashboard() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             wallets:    wallets.map((w) => w.adresse),
-            taxYear:    new Date().getFullYear(),
+            taxYear:    new Date().getFullYear() - 1,  // ESTV-Kurs des letzten abgeschlossenen Jahres
             blockchain: "bitcoin",
           }),
         });

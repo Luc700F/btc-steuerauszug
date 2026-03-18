@@ -151,12 +151,6 @@ export async function POST(request) {
       ...Object.keys(coins).filter((c) => c !== hauptwaehrung).sort(),
     ].filter((s) => coins[s]);
 
-    // FIFO für Hauptwährung – BIS Jahresende (Folgejahr-Käufe ausschliessen!)
-    const fifo = berechneFifo(
-      (coins[hauptwaehrung] || []).filter(tx => new Date(tx.datum) <= jahresendeFilter),
-      kursStichtag
-    );
-
     const kursWert =
       typeof aktuellerKurs === "object"
         ? aktuellerKurs[hauptwaehrung] || aktuellerKurs.ETH || 0
@@ -178,6 +172,12 @@ export async function POST(request) {
       kursStichtag = priceResult?.price > 0 ? priceResult.price : kursWert;
     }
     const kursLabel = `Kurs 31.12.${jahr}:`;
+
+    // FIFO für Hauptwährung – BIS Jahresende (Folgejahr-Käufe ausschliessen!)
+    const fifo = berechneFifo(
+      (coins[hauptwaehrung] || []).filter(tx => new Date(tx.datum) <= jahresendeFilter),
+      kursStichtag
+    );
 
     // ─── PDF-Dokument erstellen ────────────────────────────────────────────
     const pdf = await PDFDocument.create();
@@ -274,7 +274,7 @@ export async function POST(request) {
 
     // Portfoliowert per 31.12. – MIT jahresendeFilter (Folgejahr-Käufe ausschliessen!)
     const portfolioWertGesamt = coinSymbole.reduce((total, sym) => {
-      const kurs = alleTokenKurse[sym] ?? (sym === hauptwaehrung ? kursStichtag : 0);
+      const kurs = sym === hauptwaehrung ? kursStichtag : (alleTokenKurse[sym] ?? 0);
       if (!kurs) return total;
       const coinFifo = berechneFifo(
         (coins[sym] || []).filter(tx => new Date(tx.datum) <= jahresendeFilter),
