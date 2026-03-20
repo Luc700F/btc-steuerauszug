@@ -2,6 +2,7 @@ import { generateESteuerauszugXML } from "../lib/esteuerauszug";
 import { validateSteuerDaten } from "../lib/validate";
 import { buildSeitenbarcodeData, encodeCode128C } from "../lib/code128c";
 import { ESTV_JAHRESKURSE } from "../lib/price-service";
+import { detectInputType } from "../lib/xpub-detector";
 
 // 0.00355787 × 69990.44 = 249.02 (gerundet auf 2 Stellen)
 const ENDBESTAND = 0.00355787;
@@ -214,6 +215,80 @@ describe("ESTV Jahreskurse – verbindliche ESTV-Kursliste per 31.12.", () => {
     // Kein direktes endbestandAmount * kurs außer an der einen definierten Stelle
     const matches = src.match(/endbestandAmount\s*\*\s*kursStichtag/g) || [];
     expect(matches.length).toBe(1);
+  });
+});
+
+// ─── xPub Erkennung ───────────────────────────────────────────────────────────
+describe("xPub Erkennung – detectInputType", () => {
+  test("bc1q-Adresse wird als address erkannt", () => {
+    // BIP173-Beispieladresse (öffentliches Testvektor, kein privater Key)
+    expect(detectInputType("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")).toBe("address");
+  });
+
+  test("bc1p-Adresse wird als address erkannt (Taproot)", () => {
+    expect(detectInputType("bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0")).toBe("address");
+  });
+
+  test("Legacy-Adresse (1...) wird als address erkannt", () => {
+    expect(detectInputType("1A1zP1eP5QGefi2DMPTfTL5SLmv7Divfna")).toBe("address");
+  });
+
+  test("P2SH-Adresse (3...) wird als address erkannt", () => {
+    expect(detectInputType("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy")).toBe("address");
+  });
+
+  test("zpub wird als zpub erkannt", () => {
+    const zpub = "zpub6rLtzSoXnXKPXHroRKGCwuRVHjgA5YL6oUkdZnCfbDLdtAKNXb1FX1EmPUYR1uYMRBpngvkdJwxqhLvM46trRy5MRb7oYdSLbb4w5VC4i3z";
+    expect(detectInputType(zpub)).toBe("zpub");
+  });
+
+  test("xpub wird als xpub erkannt", () => {
+    const xpub = "xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKrhko4egpiMZbpiaQL2jkwSB1icqYh2cfDfVxdx4df189oLKnC5fSwqPfgyP3hooxujYzAu3fDVmz";
+    expect(detectInputType(xpub)).toBe("xpub");
+  });
+
+  test("leerer String gibt unknown zurück", () => {
+    expect(detectInputType("")).toBe("unknown");
+  });
+
+  test("null gibt unknown zurück", () => {
+    expect(detectInputType(null)).toBe("unknown");
+  });
+
+  test("zufälliger String gibt unknown zurück", () => {
+    expect(detectInputType("hallo123")).toBe("unknown");
+  });
+
+});
+
+describe("xPub Scanner – scanXpub", () => {
+  test("xpub-scanner.js existiert und exportiert scanXpub (@scure)", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("lib/xpub-scanner.js", "utf8");
+    expect(src).toContain("export async function scanXpub");
+    expect(src).toContain("@scure/bip32");
+    expect(src).not.toContain("tiny-secp256k1");
+  });
+
+  test("xpub-detector.js existiert und exportiert detectInputType", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("lib/xpub-detector.js", "utf8");
+    expect(src).toContain("export function detectInputType");
+  });
+
+  test("analyze/route.js importiert xpub-detector und xpub-scanner", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/api/analyze/route.js", "utf8");
+    expect(src).toContain("xpub-detector");
+    expect(src).toContain("xpub-scanner");
+    expect(src).toContain("scanXpub");
+  });
+
+  test("analyze/route.js expandiert xPub-Wallets vor der Verarbeitung", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync("app/api/analyze/route.js", "utf8");
+    expect(src).toContain("expandedWallets");
+    expect(src).toContain("xpubMeta");
   });
 });
 

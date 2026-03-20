@@ -66,6 +66,18 @@ export async function GET(request) {
     return NextResponse.json({ error: "Bitcoin-Adresse fehlt" }, { status: 400 });
   }
 
+  // xPub/ypub/zpub abfangen – darf nie an die Bitcoin-Adress-API gesendet werden
+  if (/^(x|y|z)pub[a-zA-Z0-9]{100,120}$/.test(adresse.trim())) {
+    return NextResponse.json(
+      {
+        error: "xpub_detected",
+        message:
+          "Extended Public Keys (xpub/ypub/zpub) müssen über /api/analyze verarbeitet werden, nicht über diese Route.",
+      },
+      { status: 422 }
+    );
+  }
+
   const cmcKey = process.env.COINMARKETCAP_API_KEY;
 
   try {

@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Header from "./components/Header";
 import Footer from "./components/Footer";
+import { detectInputType } from "../lib/xpub-detector";
 
 // ─── Coin-Logos (offizielle SVG-Icons) ──────────────────────────────────────
 
@@ -88,8 +89,9 @@ function validiereAdresse(adresse, kette) {
   if (!bereinigt) return "Bitte geben Sie eine Wallet-Adresse ein.";
 
   if (kette === "bitcoin") {
-    if (!/^(1|3|bc1)[a-zA-Z0-9]{25,62}$/.test(bereinigt))
-      return "Ungültige Bitcoin-Adresse. Gültige Formate: 1..., 3..., bc1...";
+    const typ = detectInputType(bereinigt);
+    if (typ === "unknown")
+      return "Ungültige Eingabe. Gültige Formate: bc1q..., 1..., 3..., zpub..., xpub...";
   } else if (kette === "ethereum") {
     if (!/^0x[a-fA-F0-9]{40}$/.test(bereinigt))
       return "Ungültige Ethereum-Adresse. Format: 0x + 40 Hex-Zeichen.";
@@ -1011,7 +1013,7 @@ export default function Home() {
                         value={w}
                         onChange={(e) => updateWallet(i, e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && handleAnalyzeAll()}
-                        placeholder="bc1q...bknm"
+                        placeholder="bc1q... oder zpub..."
                         style={{
                           width: "100%",
                           padding: "11px 56px 11px 14px",
@@ -1042,6 +1044,7 @@ export default function Home() {
                         ₿ BTC
                       </span>
                     </div>
+
                     {wallets.length > 1 && (
                       <button
                         onClick={() => removeWallet(i)}
@@ -1061,6 +1064,33 @@ export default function Home() {
                       </button>
                     )}
                   </div>
+
+                  {/* Dynamischer Typ-Hint (unter dem Eingabefeld) */}
+                  {!walletFehler[i] && w.trim().length > 10 && (() => {
+                    const typ = detectInputType(w.trim());
+                    if (typ === "address" && w.trim().startsWith("bc1p")) return (
+                      <p style={{ fontSize: "11px", color: "#e67e00", marginTop: 3 }}>
+                        Taproot-Adresse erkannt. Funktioniert als Einzel-Adresse (kein xPub-Support).
+                      </p>
+                    );
+                    if (typ === "zpub") return (
+                      <p style={{ fontSize: "11px", color: "#16a34a", marginTop: 3 }}>
+                        zpub erkannt – Native SegWit HD-Wallet (Ledger, Trezor, Relai)
+                      </p>
+                    );
+                    if (typ === "ypub") return (
+                      <p style={{ fontSize: "11px", color: "#16a34a", marginTop: 3 }}>
+                        ypub erkannt – Nested SegWit HD-Wallet
+                      </p>
+                    );
+                    if (typ === "xpub") return (
+                      <p style={{ fontSize: "11px", color: "#16a34a", marginTop: 3 }}>
+                        xpub erkannt – Legacy HD-Wallet
+                      </p>
+                    );
+                    return null;
+                  })()}
+
                   {walletFehler[i] && (
                     <p style={{ color: "#dc2626", fontSize: "0.78rem", marginTop: 4 }}>
                       ⚠ {walletFehler[i]}
@@ -1144,9 +1174,13 @@ export default function Home() {
                         animation: "spin 0.7s linear infinite",
                         display: "inline-block", flexShrink: 0,
                       }} />
-                      {wallets.filter((w) => w.trim()).length > 1
-                        ? `${wallets.filter((w) => w.trim()).length} Wallets werden geladen…`
-                        : "Wird geladen…"}
+                      {(() => {
+                        const ausgefuellte = wallets.filter((w) => w.trim());
+                        const hatXpub = ausgefuellte.some((w) => ["xpub","ypub","zpub"].includes(detectInputType(w)));
+                        if (hatXpub) return "HD-Wallet wird gescannt… (10–30s)";
+                        if (ausgefuellte.length > 1) return `${ausgefuellte.length} Wallets werden geladen…`;
+                        return "Wird geladen…";
+                      })()}
                     </>
                   ) : (
                     wallets.filter((w) => w.trim()).length > 1

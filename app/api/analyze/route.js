@@ -4,6 +4,8 @@ import { getHistoricalPriceChf, fetchAllHistoricalPrices } from "../../../lib/pr
 import { getJahresStatus } from "../../../lib/jahres-utils";
 import { calculateFIFO } from "../../../lib/fifo";
 import { validateSteuerDaten } from "../../../lib/validate";
+import { detectInputType } from "../../../lib/xpub-detector";
+import { scanXpub } from "../../../lib/xpub-scanner";
 
 export const maxDuration = 60;
 export const dynamic     = "force-dynamic";
@@ -53,17 +55,44 @@ export async function POST(req) {
       return NextResponse.json({ error: "taxYear (number) erforderlich" }, { status: 400 });
     }
 
+    // ─── xPub-Expansion: xpub/ypub/zpub → abgeleitete Adressen ─────────────
+    // Läuft nur für Bitcoin; ETH/SOL kennen kein xPub-Format
+    let xpubMeta = null;
+    let expandedWallets = wallets;
+
+    if (blockchain === "bitcoin") {
+      expandedWallets = [];
+      for (const wallet of wallets) {
+        const inputType = detectInputType(wallet.trim());
+        if (["xpub", "ypub", "zpub"].includes(inputType)) {
+          console.log(`[analyze] ${inputType} erkannt – starte Scan für ${wallet.substring(0, 14)}...`);
+          const scan = await scanXpub(wallet.trim());
+          if (scan.addresses.length === 0) {
+            return NextResponse.json(
+              { error: `Keine Transaktionen für diesen ${inputType} gefunden.` },
+              { status: 404 }
+            );
+          }
+          expandedWallets.push(...scan.addresses);
+          xpubMeta = { xpub: wallet.trim(), inputType, derivedAddresses: scan.addresses };
+          console.log(`[analyze] ${inputType} → ${scan.addresses.length} Adressen gefunden`);
+        } else {
+          expandedWallets.push(wallet);
+        }
+      }
+    }
+
     const coinGeckoId  = COINGECKO_IDS[blockchain]  || "bitcoin";
     const hauptSymbol  = HAUPT_SYMBOL[blockchain]    || "BTC";
     const { isAbgeschlossen, isLaufend, stichtagDatum, hinweis } = getJahresStatus(taxYear);
 
-    console.log("[analyze] Start:", { blockchain, taxYear, wallets: wallets.length, stichtagDatum });
+    console.log("[analyze] Start:", { blockchain, taxYear, wallets: expandedWallets.length, stichtagDatum });
 
     // ─── Schritt 1: Transaktionen aller Wallets parallel laden ────────────────
     let aktuellerKurs = 0;
 
     const walletErgebnisse = await Promise.allSettled(
-      wallets.map(async (wallet) => {
+      expandedWallets.map(async (wallet) => {
         if (blockchain === "bitcoin") {
           // mempool.space mit adressgenauer Filterung
           const rawTxs  = await fetchAllTransactions(wallet);
@@ -97,7 +126,7 @@ export async function POST(req) {
     );
 
     const fehlgeschlageneWallets = walletErgebnisse
-      .map((r, i) => (r.status === "rejected" ? wallets[i] : null))
+      .map((r, i) => (r.status === "rejected" ? expandedWallets[i] : null))
       .filter(Boolean);
 
     if (fehlgeschlageneWallets.length > 0) {
@@ -170,7 +199,9 @@ export async function POST(req) {
     // ─── Schritt 8: Vollständiges Ergebnis zurückgeben ────────────────────────
     return NextResponse.json({
       // Wallet-Info
-      wallets,
+      wallets,          // Original-Eingabe (kann xPub enthalten)
+      expandedWallets,  // Alle tatsächlich analysierten Adressen
+      xpubMeta,         // null bei Single-Wallet, Objekt bei xPub
       taxYear,
       canton,
       blockchain,

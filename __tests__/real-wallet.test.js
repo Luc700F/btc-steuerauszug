@@ -33,17 +33,21 @@ import { generateESteuerauszugXML }
 import { generateAllBarcodes }
   from "../lib/barcode";
 
-// ─── BEKANNTE BTC-ADRESSEN (öffentlich, verifizierbar) ───────────────────────
+// ─── BTC-ADRESSEN (aus Umgebungsvariablen – nie hardcoded) ───────────────────
+// Lokale .env.local befüllen: TEST_WALLET_1=bc1q...
+// Tests werden ohne die Variable übersprungen.
+
+const TEST_WALLET_1 = process.env.TEST_WALLET_1 || null;
 
 const BTC_WALLETS = {
-  // Relai Referenz-Wallet – bekannte Werte aus Entwicklungstests
+  // Referenz-Wallet – Werte via TEST_WALLET_1 Umgebungsvariable
   // 6 Txs im Jahr 2025, Endbestand 0.00355787 BTC, Steuerwert ~CHF 249.01
   relai_ref: {
-    address:               "bc1qfwuwnn39v5460vla3gvmcl8q4jlraps92jlcr9",
-    beschreibung:          "Relai Referenz-Wallet (6 Käufe 2025)",
-    erwarteteTxAnzahl2025: 6,
+    address:                TEST_WALLET_1 || "bc1q_PLACEHOLDER_ONLY",
+    beschreibung:           "Test-Wallet (TEST_WALLET_1, 6 Käufe 2025)",
+    erwarteteTxAnzahl2025:  6,
     erwartetEndbestand2025: 0.00355787,
-    adresstyp:             "bech32-segwit (bc1q)",
+    adresstyp:              "bech32-segwit (bc1q)",
   },
 
   // Binance Cold Wallet – P2SH Legacy Format (3...)
@@ -93,20 +97,23 @@ const SOL_WALLETS = {
 // BTC TESTS – Relai Referenz-Wallet
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("BTC Real-Wallet – Relai Referenz-Wallet", () => {
+describe("BTC Real-Wallet – Referenz-Wallet (TEST_WALLET_1)", () => {
   const w = BTC_WALLETS.relai_ref;
 
   test("Adressformat bc1q erkannt", () => {
+    if (!TEST_WALLET_1) { console.warn("[skip] TEST_WALLET_1 nicht gesetzt"); return; }
     expect(w.address).toMatch(/^bc1[a-z0-9]{39,87}$/i);
   });
 
   test("API-Aufruf erfolgreich (kein Netzwerkfehler)", async () => {
+    if (!TEST_WALLET_1) { return; }
     const txs = await fetchAllTransactions(w.address);
     expect(Array.isArray(txs)).toBe(true);
     expect(txs.length).toBeGreaterThan(0);
   }, 60000);
 
   test("Genau 6 Transaktionen in 2025", async () => {
+    if (!TEST_WALLET_1) { return; }
     const allTxs  = await fetchAllTransactions(w.address);
     const parsed  = parseTxsForAddress(allTxs, w.address);
     const tx2025  = parsed.filter((t) => t.date.startsWith("2025"));
@@ -114,6 +121,7 @@ describe("BTC Real-Wallet – Relai Referenz-Wallet", () => {
   }, 60000);
 
   test("Endbestand 2025 = 0.00355787 BTC (exakt)", async () => {
+    if (!TEST_WALLET_1) { return; }
     const allTxs = await fetchAllTransactions(w.address);
     const parsed  = parseTxsForAddress(allTxs, w.address);
     const kurs    = await getHistoricalPriceChf("bitcoin", "2025-12-31");
@@ -122,6 +130,7 @@ describe("BTC Real-Wallet – Relai Referenz-Wallet", () => {
   }, 120000);
 
   test("Steuerwert konsistent: endbestand × kurs3112", async () => {
+    if (!TEST_WALLET_1) { return; }
     const allTxs   = await fetchAllTransactions(w.address);
     const parsed   = parseTxsForAddress(allTxs, w.address);
     const kurs     = await getHistoricalPriceChf("bitcoin", "2025-12-31");
@@ -138,6 +147,7 @@ describe("BTC Real-Wallet – Relai Referenz-Wallet", () => {
   }, 120000);
 
   test("Kein fremder Change-Output im Endbestand (nicht 0.00528039 BTC)", async () => {
+    if (!TEST_WALLET_1) { return; }
     // Vor dem Adressfilter-Fix war Endbestand 0.00528 statt 0.00355787
     const allTxs = await fetchAllTransactions(w.address);
     const parsed  = parseTxsForAddress(allTxs, w.address);
@@ -148,6 +158,7 @@ describe("BTC Real-Wallet – Relai Referenz-Wallet", () => {
   }, 120000);
 
   test("Vollständiger Flow: XML + Barcode ohne Crash", async () => {
+    if (!TEST_WALLET_1) { return; }
     const allTxs  = await fetchAllTransactions(w.address);
     const parsed  = parseTxsForAddress(allTxs, w.address);
     const kurs    = await getHistoricalPriceChf("bitcoin", "2025-12-31");
@@ -243,6 +254,7 @@ describe("BTC Real-Wallet – Verschiedene Steuerjahre", () => {
   test.each([2024, 2025])(
     "Jahr %i: Endbestand >= 0 und Steuerwert konsistent",
     async (year) => {
+      if (!TEST_WALLET_1) { return; }
       const allTxs = await fetchAllTransactions(addr);
       const parsed = parseTxsForAddress(allTxs, addr);
       const kurs   = await getHistoricalPriceChf("bitcoin", `${year}-12-31`);
@@ -420,6 +432,7 @@ describe("Cross-Chain – CoinGecko Datumformat DD-MM-YYYY korrekt", () => {
 
 describe("Cross-Chain – Steuerwert nie 366.37 (historischer Bug)", () => {
   test("BTC Referenz-Wallet 2025: Steuerwert ≠ 366.37", async () => {
+    if (!TEST_WALLET_1) { return; }
     const addr   = BTC_WALLETS.relai_ref.address;
     const allTxs = await fetchAllTransactions(addr);
     const parsed = parseTxsForAddress(allTxs, addr);
