@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import LoadingBar from "../components/LoadingBar";
 import { getSteuerjahre, getJahresStatus } from "../../lib/jahres-utils";
+import { detectInputType } from "../../lib/xpub-detector";
 
 // ─── Farben ──────────────────────────────────────────────────────────────────
 const FARBEN = {
@@ -196,10 +197,22 @@ function CheckoutModal({ kantonDefault, onBestaetigen, onUeberspringen, titel })
         {/* Datenschutz-Hinweis */}
         <div style={{
           background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7,
-          padding: "8px 12px", marginBottom: "1.25rem",
+          padding: "8px 12px", marginBottom: "0.75rem",
           fontSize: "0.77rem", color: "#166534",
         }}>
           🔒 Ihre Angaben verlassen nicht diesen Browser
+        </div>
+
+        {/* Haftungsausschluss vor Bezahlung */}
+        <div style={{
+          background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 7,
+          padding: "10px 12px", marginBottom: "1.25rem",
+          fontSize: "0.76rem", color: "#92400e", lineHeight: 1.5,
+        }}>
+          <strong>Bitte vor der Bezahlung prüfen:</strong> Kontrolliere alle Transaktionen
+          und Steuerwerte auf Vollständigkeit und Richtigkeit. btcSteuerauszug.ch übernimmt
+          keine Haftung für fehlerhafte oder unvollständige Daten.{" "}
+          <strong>Einmal bezahlte Exporte werden nicht rückerstattet.</strong>
         </div>
 
         {/* Buttons */}
@@ -501,7 +514,7 @@ function WalletDashboard({ walletDaten, istAktiv, externeTransaktionen = null, e
   const [kurs3112, setKurs3112] = useState(externKurs3112);
   const [laedt, setLaedt] = useState(externeTransaktionen === null);
   const [fehler, setFehler] = useState(null);
-  const [ausgewaehltesJahr, setAusgewaehltesJahr] = useState(String(new Date().getFullYear()));
+  const [ausgewaehltesJahr, setAusgewaehltesJahr] = useState(String(new Date().getFullYear() - 1));
   const [exportLaedt, setExportLaedt] = useState(false);
   const [kanton, setKanton] = useState("ZH");
   const [tokenKurse, setTokenKurse] = useState({});
@@ -517,10 +530,9 @@ function WalletDashboard({ walletDaten, istAktiv, externeTransaktionen = null, e
     if (externKurs3112 !== null) setKurs3112(externKurs3112);
     setLaedt(false);
     if (externeTransaktionen.length > 0) {
-      const neuestesJahr = Math.max(
-        ...externeTransaktionen.map((tx) => new Date(tx.datum).getFullYear())
-      ).toString();
-      setAusgewaehltesJahr(neuestesJahr);
+      const _akt = new Date().getFullYear();
+      const _max = Math.max(...externeTransaktionen.map((tx) => new Date(tx.datum).getFullYear()).filter((j) => j < _akt));
+      setAusgewaehltesJahr(String(isFinite(_max) ? _max : _akt - 1));
     }
   }, [externeTransaktionen, externAktuellerKurs]);
 
@@ -558,6 +570,36 @@ function WalletDashboard({ walletDaten, istAktiv, externeTransaktionen = null, e
         return;
       }
 
+      // ── xPub/ypub/zpub: über /api/analyze routen (nicht direkt wallet/bitcoin) ─
+      if (kette === "bitcoin" && ["xpub", "ypub", "zpub"].includes(detectInputType(adresse))) {
+        const taxYear = new Date().getFullYear() - 1;
+        const analyzeAntwort = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallets: [adresse], taxYear, blockchain: "bitcoin" }),
+        });
+        let analyzeDaten;
+        try {
+          analyzeDaten = await analyzeAntwort.json();
+        } catch {
+          throw new Error(`Server-Fehler (HTTP ${analyzeAntwort.status}): Ungültige API-Antwort`);
+        }
+        if (!analyzeAntwort.ok) {
+          throw new Error(analyzeDaten.error || "HD-Wallet Analyse fehlgeschlagen");
+        }
+        setAlleTransaktionen(analyzeDaten.transaktionen || []);
+        setAktuellerKurs(analyzeDaten.aktuellerKurs || 0);
+        if (analyzeDaten.kurs3112) setKurs3112(analyzeDaten.kurs3112);
+        setTokenKurse({ BTC: analyzeDaten.aktuellerKurs || 0 });
+        if (analyzeDaten.transaktionen?.length > 0) {
+          const _akt = new Date().getFullYear();
+          const _max = Math.max(...analyzeDaten.transaktionen.map((tx) => new Date(tx.datum).getFullYear()).filter((j) => j < _akt));
+          const neuestesJahr = String(isFinite(_max) ? _max : _akt - 1);
+          setAusgewaehltesJahr(neuestesJahr);
+        }
+        return; // finally setzt setLaedt(false)
+      }
+
       const endpunkt =
         kette === "bitcoin"
           ? `/api/wallet/bitcoin?address=${encodeURIComponent(adresse)}`
@@ -575,7 +617,13 @@ function WalletDashboard({ walletDaten, istAktiv, externeTransaktionen = null, e
         throw new Error(`Server-Fehler (HTTP ${antwort.status}): Ungültige API-Antwort`);
       }
 
-      if (!antwort.ok) throw new Error(daten.error || "Fehler beim Laden");
+      if (!antwort.ok) {
+        // xpub_detected: WalletDashboard ist nicht zuständig – Parent liefert Daten via externeTransaktionen
+        if (antwort.status === 422 && daten.error === "xpub_detected") {
+          return; // finally setzt laedt=false; kein Fehler zeigen
+        }
+        throw new Error(daten.error || "Fehler beim Laden");
+      }
 
       // API-Hinweis anzeigen (z.B. fehlender Etherscan Key)
       if (daten.fehler) {
@@ -598,11 +646,11 @@ function WalletDashboard({ walletDaten, istAktiv, externeTransaktionen = null, e
         setTokenKurse({ [hauptwährungSymbol]: aktKurs || 0 });
       }
 
-      // Neuestes Jahr automatisch wählen
+      // Letztes abgeschlossenes Jahr wählen (nie laufendes Jahr)
       if (daten.transaktionen?.length > 0) {
-        const neuestesJahr = Math.max(
-          ...daten.transaktionen.map((tx) => new Date(tx.datum).getFullYear())
-        ).toString();
+        const _akt = new Date().getFullYear();
+        const _max = Math.max(...daten.transaktionen.map((tx) => new Date(tx.datum).getFullYear()).filter((j) => j < _akt));
+        const neuestesJahr = String(isFinite(_max) ? _max : _akt - 1);
         setAusgewaehltesJahr(neuestesJahr);
       }
     } catch (err) {
@@ -1260,6 +1308,7 @@ export default function Dashboard() {
   const [gemergterKurs, setGemergterKurs] = useState(null);
   const [gemergterKurs3112, setGemergterKurs3112] = useState(null);
   const [multiWalletLaedt, setMultiWalletLaedt] = useState(false);
+  const analyzeGeladen = useRef(false);
 
   // Wallets aus localStorage laden
   useEffect(() => {
@@ -1285,26 +1334,37 @@ export default function Dashboard() {
     }
   }, [router]);
 
-  // ─── Single BTC-Wallet: kurs3112 via analyze holen (für korrekte PDF-Exporte) ──
+  // ─── Single BTC-Wallet: kurs3112 + xpub-Transaktionen via analyze ───────────
   useEffect(() => {
     if (!wallets || wallets.length !== 1 || wallets[0].kette !== "bitcoin") return;
+    if (analyzeGeladen.current) return; // Doppel-Call verhindern (StrictMode / Re-Render)
+    analyzeGeladen.current = true;
+
+    const adresse = wallets[0].adresse;
+
     (async () => {
       try {
         const antwort = await fetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            wallets: [wallets[0].adresse],
-            taxYear: new Date().getFullYear() - 1, // letztes abgeschlossenes Jahr
+            wallets: [adresse],
+            taxYear: new Date().getFullYear() - 1,
             blockchain: "bitcoin",
           }),
         });
         if (antwort.ok) {
           const daten = await antwort.json();
           if (daten.kurs3112 > 0) setGemergterKurs3112(daten.kurs3112);
+          if (daten.transaktionen?.length > 0) {
+            setGemergteTransaktionen(daten.transaktionen);
+          }
+          if (daten.aktuellerKurs > 0) setGemergterKurs(daten.aktuellerKurs);
         }
       } catch {}
     })();
+
+    return () => { analyzeGeladen.current = false; };
   }, [wallets]);
 
   // ─── Multi-Wallet: alle BTC-Transaktionen parallel laden und zusammenführen ──
@@ -1693,6 +1753,8 @@ export default function Dashboard() {
         ) : aktiveWallet ? (
           <WalletDashboard
             walletDaten={aktiveWallet}
+            externeTransaktionen={gemergteTransaktionen}
+            externAktuellerKurs={gemergterKurs}
             externKurs3112={gemergterKurs3112}
             istAktiv
           />

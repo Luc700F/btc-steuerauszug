@@ -1,6 +1,6 @@
 {
   "name": "krypto-steuer-tool",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,22 +10,27 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:unit": "jest --testPathPattern='(konsistenz|barcode|historische-preise|multi-wallet|endbestand|jahres-support|pdf-generierung|security|erc20-sol|fifo|csv-parser|steuerwert-31-12|price-service|kurs-steuerwert|barcode-ech0270|barcode-layout)'",
+    "test:unit": "jest --testPathPattern='(konsistenz|barcode|historische-preise|multi-wallet|endbestand|jahres-support|pdf-generierung|security|erc20-sol|fifo|csv-parser|steuerwert-31-12|price-service|kurs-steuerwert|barcode-ech0270|barcode-layout|csv-bitbox|xpub-scanner|xpub-dashboard|pdf-generierung-vollstaendig|pdf-vollstaendig|xpub-e2e|xpub-jahresselektion)'",
     "test:vercel": "jest --testPathPattern='vercel-kompatibilitaet' --testTimeout=120000",
     "test:realwallet": "jest --testPathPattern='real-wallet' --testTimeout=180000",
+    "test:xpub": "jest --testPathPattern='xpub-e2e' --forceExit",
     "test:all": "jest --runInBand",
-    "test:pre-deploy": "npm run test:unit && npm run test:vercel && npm run test:realwallet"
+    "test:pre-deploy": "npm run test:unit && npm run test:vercel"
   },
   "dependencies": {
     "@vercel/analytics": "^1.6.1",
     "@vercel/speed-insights": "^1.3.1",
+    "bip32": "^5.0.1",
+    "bitcoinjs-lib": "^7.0.1",
+    "bs58check": "^4.0.0",
     "bwip-js": "^4.8.0",
     "next": "16.1.6",
     "pako": "^2.1.0",
     "pdf-lib": "^1.17.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "stripe": "^20.4.0"
+    "stripe": "^20.4.0",
+    "tiny-secp256k1": "^2.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
