@@ -740,8 +740,11 @@ function WalletDashboard({ walletDaten, istAktiv, externeTransaktionen = null, e
       (tx) => new Date(tx.datum) <= new Date(`${ausgewaehltesJahr}-12-31T23:59:59`)
     );
     const alleCoins = [...new Set(txBisStichtag.map((tx) => tx.waehrung))];
+    const istAbgeschlossen = ausgewaehltesJahr < String(new Date().getFullYear());
     return alleCoins.reduce((total, sym) => {
-      const kurs = holeKursFuerSymbol(sym, txBisStichtag);
+      let kurs = holeKursFuerSymbol(sym, txBisStichtag);
+      // Für abgeschlossene Jahre: ESTV 31.12.-Kurs bevorzugen (korrekter Steuerwert)
+      if (istAbgeschlossen && sym === hauptwaehrung && kurs3112) kurs = kurs3112;
       if (!kurs) return total;
       const fifo = berechneFifo(
         txBisStichtag.filter((tx) => tx.waehrung === sym),

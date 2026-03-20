@@ -91,22 +91,25 @@ describe("VERSIONS Bytes (BIP44/49/84)", () => {
   });
 });
 
-// ─── Performance & Robustheit ─────────────────────────────────────────────────
+// ─── Korrektheit & Robustheit ─────────────────────────────────────────────────
 
-describe("xpub-scanner.js — Performance & Robustheit", () => {
+describe("xpub-scanner.js — Korrektheit & Robustheit", () => {
   const fs   = require("fs");
   const code = fs.readFileSync("lib/xpub-scanner.js", "utf8");
 
   test("kein setTimeout Delay im Normalfall", () =>
     expect(code).not.toContain("setTimeout(res, 100)"));
 
-  test("Batch-Verarbeitung vorhanden", () => {
-    expect(code).toContain("Promise.all");
-    expect(code).toContain("BATCH");
-  });
-
   test("Retry-Logik bei 429", () => {
     expect(code).toContain("429");
     expect(code).toContain("retries");
+  });
+
+  test("scanChain: Gap kumulativ, nicht per Batch", () => {
+    // Kein Promise.all in scanChain (verursacht falsches Gap-Counting)
+    expect(code).not.toContain("Promise.all(\n      batch");
+    // Sequentieller Loop mit korrektem gap++
+    expect(code).toContain("gap++");
+    expect(code).toContain("gap = 0");
   });
 });
