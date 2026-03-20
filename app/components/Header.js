@@ -21,7 +21,9 @@ export default function Header() {
         {/* Logo */}
         <Link href="/" style={{ textDecoration: "none", flexShrink: 0 }}>
           <div style={{ fontWeight: 800, fontSize: "1.35rem", letterSpacing: "-0.03em", lineHeight: 1 }}>
-            <span style={{ color: "#F7931A" }}>btc</span>
+            <span style={{ color: "#F7931A" }}>b</span>
+            <span style={{ color: "#627EEA" }}>t</span>
+            <span style={{ color: "#9945FF" }}>c</span>
             <span style={{ color: "#1a1a1a" }}>Steuerauszug</span>
           </div>
           <div style={{ fontSize: "0.7rem", color: "#9ca3af", whiteSpace: "nowrap" }}>

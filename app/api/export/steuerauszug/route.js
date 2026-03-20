@@ -252,9 +252,11 @@ function zeichneSeiteHeader(seite, schriften, seitenNr, gesamtSeiten, jahr, barc
   const { width: pageW, height: pageH } = seite.getSize();
   const contentL = L;  // = CONTENT_LEFT = 73pt (nach Barcode-Bereich)
 
-  const DUNKEL   = rgb(0.067, 0.094, 0.153);
-  const HELLGRAU = rgb(0.95, 0.95, 0.95);
-  const GRAU     = rgb(0.4, 0.4, 0.4);
+  const DUNKEL     = rgb(0.067, 0.094, 0.153);
+  const HELLGRAU   = rgb(0.95, 0.95, 0.95);
+  const GRAU       = rgb(0.4, 0.4, 0.4);
+  const ETH_BLUE   = rgb(0.384, 0.494, 0.918);
+  const SOL_PURPLE = rgb(0.600, 0.271, 1.000);
 
   // CODE128C Seitenbarcode oben links (pure pdf-lib Rechtecke, kein bwip-js)
   drawSeitenbarcode(seite, normal, {
@@ -264,10 +266,17 @@ function zeichneSeiteHeader(seite, schriften, seitenNr, gesamtSeiten, jahr, barc
     gesamtseiten:  gesamtSeiten,
   });
 
-  // Logo oben links
-  seite.drawText("btcSteuerauszug.ch", {
-    x: contentL, y: pageH - 24, size: 13, font: bold, color: DUNKEL,
-  });
+  // Logo oben links — Tri-Color b(orange)/t(blau)/c(violett)
+  const ORANGE_H = rgb(0.969, 0.576, 0.102);
+  let hx = contentL;
+  const HS = 13;
+  seite.drawText("b", { x: hx, y: pageH - 24, size: HS, font: bold, color: ORANGE_H });
+  hx += bold.widthOfTextAtSize("b", HS);
+  seite.drawText("t", { x: hx, y: pageH - 24, size: HS, font: bold, color: ETH_BLUE });
+  hx += bold.widthOfTextAtSize("t", HS);
+  seite.drawText("c", { x: hx, y: pageH - 24, size: HS, font: bold, color: SOL_PURPLE });
+  hx += bold.widthOfTextAtSize("c", HS);
+  seite.drawText("Steuerauszug.ch", { x: hx, y: pageH - 24, size: HS, font: bold, color: DUNKEL });
   seite.drawText(`Steuerauszug in CHF 31.12.${jahr}`, {
     x: contentL, y: pageH - 40, size: 9, font: normal, color: GRAU,
   });
@@ -328,9 +337,17 @@ function zeichneSeiteHeader(seite, schriften, seitenNr, gesamtSeiten, jahr, barc
     start: { x: contentL, y: 25 }, end: { x: pageW - R, y: 25 },
     thickness: 0.4, color: rgb(0.88, 0.88, 0.88),
   });
-  seite.drawText("btcSteuerauszug.ch", {
-    x: contentL, y: 13, size: 7.5, font: normal, color: rgb(0.6, 0.6, 0.6),
-  });
+  // Footer Logo — Tri-Color b(orange)/t(blau)/c(violett)
+  const FGRAU = rgb(0.6, 0.6, 0.6);
+  let fx = contentL;
+  const FS = 7.5;
+  seite.drawText("b", { x: fx, y: 13, size: FS, font: normal, color: rgb(0.969, 0.576, 0.102) });
+  fx += normal.widthOfTextAtSize("b", FS);
+  seite.drawText("t", { x: fx, y: 13, size: FS, font: normal, color: ETH_BLUE });
+  fx += normal.widthOfTextAtSize("t", FS);
+  seite.drawText("c", { x: fx, y: 13, size: FS, font: normal, color: SOL_PURPLE });
+  fx += normal.widthOfTextAtSize("c", FS);
+  seite.drawText("Steuerauszug.ch", { x: fx, y: 13, size: FS, font: normal, color: FGRAU });
   const seitenText = `Seite ${seitenNr} von ${gesamtSeiten}`;
   const sW = normal.widthOfTextAtSize(seitenText, 7.5);
   seite.drawText(seitenText, {

@@ -50,17 +50,23 @@ function berechneFifo(transaktionen, aktuellerKurs) {
 
 // ─── Seitenvorlage zeichnen ──────────────────────────────────────────────────
 function zeichneSeiteKopf(seite, schriftBold, schrift, seitenBreite, seitenHoehe, seitenNr, gesamtSeiten, Jahr) {
-  const ORANGE = rgb(0.969, 0.576, 0.102);
-  const DUNKEL = rgb(0.067, 0.094, 0.153);
+  const ORANGE     = rgb(0.969, 0.576, 0.102);
+  const DUNKEL     = rgb(0.067, 0.094, 0.153);
+  const ETH_BLUE   = rgb(0.384, 0.494, 0.918);
+  const SOL_PURPLE = rgb(0.600, 0.271, 1.000);
 
-  // Logo-Text: "btcSteuerauszug"
-  seite.drawText("btcSteuerauszug.ch", {
-    x: 40,
-    y: seitenHoehe - 38,
-    size: 14,
-    font: schriftBold,
-    color: DUNKEL,
-  });
+  // Logo-Text: "btcSteuerauszug.ch" mit Tri-Color b(orange)/t(blau)/c(violett)
+  const LOGO_X = 40;
+  const LOGO_Y = seitenHoehe - 38;
+  const LOGO_SIZE = 14;
+  let lx = LOGO_X;
+  seite.drawText("b", { x: lx, y: LOGO_Y, size: LOGO_SIZE, font: schriftBold, color: ORANGE });
+  lx += schriftBold.widthOfTextAtSize("b", LOGO_SIZE);
+  seite.drawText("t", { x: lx, y: LOGO_Y, size: LOGO_SIZE, font: schriftBold, color: ETH_BLUE });
+  lx += schriftBold.widthOfTextAtSize("t", LOGO_SIZE);
+  seite.drawText("c", { x: lx, y: LOGO_Y, size: LOGO_SIZE, font: schriftBold, color: SOL_PURPLE });
+  lx += schriftBold.widthOfTextAtSize("c", LOGO_SIZE);
+  seite.drawText("Steuerauszug.ch", { x: lx, y: LOGO_Y, size: LOGO_SIZE, font: schriftBold, color: DUNKEL });
 
   // Orangener Balken unter dem Logo
   seite.drawRectangle({
